@@ -5,12 +5,22 @@ public class WaypointFollower : MonoBehaviour
     [Header("Path Settings")]
     [SerializeField] private Transform[] waypoints;
 
-    [Header("Movement")]
+    [Header("Movement - Choose One")]
+    [SerializeField] private bool useProgress = false; // false로 기본 설정
     [Range(0f, 1f)]
     [SerializeField] private float progress = 0f; // 0 = 시작, 1 = 끝
 
-    [Header("Options")]
+    [Header("Waypoint Number Control")]
+    [SerializeField] private float currentWaypoint = 0f; // 0 ~ waypoints.Length-1
+    [Range(0f, 1f)]
+    [SerializeField] private float waypointProgress = 0f; // 현재 웨이포인트 내 진행도
+
+    [Header("Rotation Settings")]
+    [SerializeField] private bool useWaypointRotation = false; // 웨이포인트 회전값 사용
     [SerializeField] private bool smoothRotation = true;
+    [SerializeField] private float rotationSpeed = 10f; // 회전 부드러움 조절
+
+    [Header("Options")]
     [SerializeField] private bool useSmoothCurve = true; // Catmull-Rom
 
     void Update()
@@ -18,11 +28,7 @@ public class WaypointFollower : MonoBehaviour
         if (waypoints == null || waypoints.Length == 0) return;
 
         UpdatePosition();
-
-        if (smoothRotation)
-        {
-            UpdateRotation();
-        }
+        UpdateRotation();
     }
 
     void UpdatePosition()
@@ -33,13 +39,24 @@ public class WaypointFollower : MonoBehaviour
             return;
         }
 
-        if (useSmoothCurve && waypoints.Length >= 4)
+        float t;
+        if (useProgress)
         {
-            transform.position = GetCatmullRomPosition(progress);
+            t = progress;
         }
         else
         {
-            transform.position = GetLinearPosition(progress);
+            // 웨이포인트 번호를 progress로 변환
+            t = ConvertWaypointToProgress(currentWaypoint, waypointProgress);
+        }
+
+        if (useSmoothCurve && waypoints.Length >= 4)
+        {
+            transform.position = GetCatmullRomPosition(t);
+        }
+        else
+        {
+            transform.position = GetLinearPosition(t);
         }
     }
 
@@ -47,8 +64,127 @@ public class WaypointFollower : MonoBehaviour
     {
         if (waypoints.Length < 2) return;
 
-        Quaternion targetRotation = GetRotationAtProgress(progress);
-        transform.rotation = targetRotation;
+        float t = useProgress ? progress : ConvertWaypointToProgress(currentWaypoint, waypointProgress);
+        Quaternion targetRotation;
+
+        if (useWaypointRotation)
+        {
+            // 웨이포인트의 회전값 보간
+            targetRotation = GetRotationAtProgress(t);
+        }
+        else
+        {
+            // 이동 방향으로 회전
+            Vector3 direction = GetDirectionAtProgress(t);
+            if (direction == Vector3.zero) return;
+            targetRotation = Quaternion.LookRotation(direction);
+        }
+
+        if (smoothRotation)
+        {
+            transform.rotation = Quaternion.Slerp(
+                transform.rotation,
+                targetRotation,
+                Time.deltaTime * rotationSpeed
+            );
+        }
+        else
+        {
+            transform.rotation = targetRotation;
+        }
+    }
+
+    // 웨이포인트 번호를 progress(0~1)로 변환
+    float ConvertWaypointToProgress(float waypointNum, float wpProgress)
+    {
+        if (waypoints.Length <= 1) return 0f;
+
+        int totalSegments = waypoints.Length - 1;
+
+        // 웨이포인트 번호를 0 ~ totalSegments 범위로 클램프
+        float clampedWaypoint = Mathf.Clamp(waypointNum, 0f, totalSegments);
+
+        // 해당 웨이포인트의 시작 progress
+        float baseProgress = clampedWaypoint / totalSegments;
+
+        // 세그먼트 내 진행도 추가
+        float segmentLength = 1f / totalSegments;
+        float finalProgress = baseProgress + (wpProgress * segmentLength);
+
+        return Mathf.Clamp01(finalProgress);
+    }
+
+    // progress를 웨이포인트 번호로 변환 (디버깅용)
+    void ConvertProgressToWaypoint(float prog, out float waypointNum, out float wpProg)
+    {
+        if (waypoints.Length <= 1)
+        {
+            waypointNum = 0f;
+            wpProg = 0f;
+            return;
+        }
+
+        int totalSegments = waypoints.Length - 1;
+        float segmentValue = prog * totalSegments;
+
+        waypointNum = Mathf.Floor(segmentValue);
+        wpProg = segmentValue - waypointNum;
+    }
+
+    // 특정 웨이포인트로 즉시 이동
+    public void MoveToWaypoint(int waypointIndex, float progressInSegment = 0f)
+    {
+        useProgress = false;
+        currentWaypoint = Mathf.Clamp(waypointIndex, 0, waypoints.Length - 1);
+        waypointProgress = Mathf.Clamp01(progressInSegment);
+    }
+
+    // 특정 웨이포인트로 이동 (float 버전)
+    public void MoveToWaypoint(float waypointNumber)
+    {
+        useProgress = false;
+        currentWaypoint = waypointNumber;
+        waypointProgress = 0f;
+    }
+
+    // 웨이포인트 회전값 보간
+    Quaternion GetRotationAtProgress(float t)
+    {
+        float totalSegments = waypoints.Length - 1;
+        float currentSegment = t * totalSegments;
+        int index = Mathf.FloorToInt(currentSegment);
+        int nextIndex = Mathf.Min(index + 1, waypoints.Length - 1);
+
+        float segmentProgress = currentSegment - index;
+
+        return Quaternion.Slerp(
+            waypoints[index].rotation,
+            waypoints[nextIndex].rotation,
+            segmentProgress
+        );
+    }
+
+    // 특정 진행도에서의 이동 방향 계산
+    Vector3 GetDirectionAtProgress(float t)
+    {
+        float delta = 0.01f;
+        float nextT = Mathf.Min(t + delta, 1f);
+
+        Vector3 currentPos;
+        Vector3 nextPos;
+
+        if (useSmoothCurve && waypoints.Length >= 4)
+        {
+            currentPos = GetCatmullRomPosition(t);
+            nextPos = GetCatmullRomPosition(nextT);
+        }
+        else
+        {
+            currentPos = GetLinearPosition(t);
+            nextPos = GetLinearPosition(nextT);
+        }
+
+        return (nextPos - currentPos).normalized;
     }
 
     Vector3 GetLinearPosition(float t)
@@ -83,22 +219,6 @@ public class WaypointFollower : MonoBehaviour
             (-a + c) * u +
             (2f * a - 5f * b + 4f * c - d) * u * u +
             (-a + 3f * b - 3f * c + d) * u * u * u
-        );
-    }
-
-    Quaternion GetRotationAtProgress(float t)
-    {
-        float totalSegments = waypoints.Length - 1;
-        float currentSegment = t * totalSegments;
-        int index = Mathf.FloorToInt(currentSegment);
-        int nextIndex = Mathf.Min(index + 1, waypoints.Length - 1);
-
-        float segmentProgress = currentSegment - index;
-
-        return Quaternion.Slerp(
-            waypoints[index].rotation,
-            waypoints[nextIndex].rotation,
-            segmentProgress
         );
     }
 
@@ -149,6 +269,22 @@ public class WaypointFollower : MonoBehaviour
 
             Gizmos.DrawLine(prevPos, currentPos);
             prevPos = currentPos;
+        }
+
+        // 진행 방향 화살표 (현재 위치에서)
+        if (Application.isPlaying)
+        {
+            Gizmos.color = Color.green;
+            float t = useProgress ? progress : ConvertWaypointToProgress(currentWaypoint, waypointProgress);
+            Vector3 direction = GetDirectionAtProgress(t);
+            if (direction != Vector3.zero)
+            {
+                Vector3 currentPos = useSmoothCurve && waypoints.Length >= 4
+                    ? GetCatmullRomPosition(t)
+                    : GetLinearPosition(t);
+
+                Gizmos.DrawRay(currentPos, direction * 2f);
+            }
         }
     }
 }
