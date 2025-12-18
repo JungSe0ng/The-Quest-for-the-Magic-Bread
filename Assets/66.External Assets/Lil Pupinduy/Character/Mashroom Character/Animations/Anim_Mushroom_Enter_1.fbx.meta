@@ -1,7 +1,14 @@
 fileFormatVersion: 2
 guid: e79ad5531d693e5449c3c33626b854c0
+AssetOrigin:
+  serializedVersion: 1
+  productId: 342514
+  packageName: Mushroom Character
+  packageVersion: 1.0
+  assetPath: Assets/Lil Pupinduy/Character/Mashroom Character/Animations/Anim_Mushroom_Enter_1.fbx
+  uploadId: 812972
 ModelImporter:
-  serializedVersion: 22200
+  serializedVersion: 24200
   internalIDToNameTable: []
   externalObjects: {}
   materials:
@@ -16,8 +23,6 @@ ModelImporter:
     optimizeGameObjects: 0
     removeConstantScaleCurves: 0
     motionNodeName: 
-    rigImportErrors: 
-    rigImportWarnings: 
     animationImportErrors: 
     animationImportWarnings: 
     animationRetargetingWarnings: 
@@ -87,6 +92,9 @@ ModelImporter:
     maxBonesPerVertex: 4
     minBoneWeight: 0.001
     optimizeBones: 1
+    generateMeshLods: 0
+    meshLodGenerationFlags: 0
+    maximumMeshLod: -1
     meshOptimizationFlags: -1
     indexFormat: 0
     secondaryUVAngleDistortion: 8
@@ -124,8 +132,7 @@ ModelImporter:
     hasTranslationDoF: 0
     hasExtraRoot: 0
     skeletonHasParents: 1
-  lastHumanDescriptionAvatarSource: {fileID: 9000000, guid: 8daf1cc2faf6c8f41ae941c9304e9480,
-    type: 3}
+  lastHumanDescriptionAvatarSource: {fileID: 9000000, guid: 8daf1cc2faf6c8f41ae941c9304e9480, type: 3}
   autoGenerateAvatarMappingIfUnspecified: 1
   animationType: 2
   humanoidOversampling: 1
@@ -137,10 +144,3 @@ ModelImporter:
   userData: 
   assetBundleName: 
   assetBundleVariant: 
-AssetOrigin:
-  serializedVersion: 1
-  productId: 342514
-  packageName: Mushroom Character
-  packageVersion: 1.0
-  assetPath: Assets/Lil Pupinduy/Character/Mashroom Character/Animations/Anim_Mushroom_Enter_1.fbx
-  uploadId: 812972

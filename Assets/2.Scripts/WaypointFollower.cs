@@ -1,41 +1,292 @@
 using UnityEngine;
+using System.Collections;
 
 public class WaypointFollower : MonoBehaviour
 {
-    [Header("Path Settings")]
+    [Header("Waypoint Groups")]
+    [SerializeField] private Transform[] waypointGroups;
+    [SerializeField] private int currentGroupIndex = 0;
     [SerializeField] private Transform[] waypoints;
+    [SerializeField] private bool preventTimelineReset = true;
 
     [Header("Movement - Choose One")]
-    [SerializeField] private bool useProgress = false; // false로 기본 설정
+    [SerializeField] private bool useProgress = false;
     [Range(0f, 1f)]
-    [SerializeField] private float progress = 0f; // 0 = 시작, 1 = 끝
+    [SerializeField] private float progress = 0f;
 
     [Header("Waypoint Number Control")]
-    [SerializeField] private float currentWaypoint = 0f; // 0 ~ waypoints.Length-1
+    [SerializeField] private float currentWaypoint = 0f;
     [Range(0f, 1f)]
-    [SerializeField] private float waypointProgress = 0f; // 현재 웨이포인트 내 진행도
+    [SerializeField] private float waypointProgress = 0f;
+
+    [Header("Y-Axis Oscillation")]
+    [SerializeField] private bool enableYOscillation = false;
+    [SerializeField] private float yAmplitude = 1f;
+    [SerializeField] private float ySpeed = 0.2f;
+
+    private bool isYOscillating = false;
+    private float yOscillationTime = 0f;
+    private float baseYPosition = 0f;
+
+    [Header("Shake Effect (One-Time)")]
+    [SerializeField] private float shakeDuration = 0.5f;
+    [SerializeField] private float shakeIntensity = 0.2f;
+    [SerializeField] private AnimationCurve shakeCurve = AnimationCurve.EaseInOut(0, 1, 1, 0);
+
+    private bool isShaking = false;
 
     [Header("Rotation Settings")]
-    [SerializeField] private bool useWaypointRotation = false; // 웨이포인트 회전값 사용
+    [SerializeField] private bool useWaypointRotation = false;
     [SerializeField] private bool smoothRotation = true;
-    [SerializeField] private float rotationSpeed = 10f; // 회전 부드러움 조절
+    [SerializeField] private float rotationSpeed = 10f;
+    [SerializeField] private bool useSlopeRotation = true;
+    [SerializeField] private float slopeRotationSpeed = 5f;
+
+    [Header("Steering Handles")]
+    [SerializeField] private Transform leftHandle;
+    [SerializeField] private Transform rightHandle;
+    [SerializeField] private float maxSteeringAngle = 90f;
+    [SerializeField] private float steeringSpeed = 5f;
+    [SerializeField] private Vector3 steeringAxis = Vector3.forward;
 
     [Header("Options")]
-    [SerializeField] private bool useSmoothCurve = true; // Catmull-Rom
+    [SerializeField] private bool useSmoothCurve = true;
+
+    private float currentSteeringAngle = 0f;
+    private Quaternion leftHandleInitialRotation;
+    private Quaternion rightHandleInitialRotation;
+
+    // 타임라인 리셋 방지용 변수들
+    private int lastSwitchedGroupIndex = -1;
+    private float lastSwitchTime = -1f;
+    private float switchCooldown = 0.5f;
+
+    // 추가: 초기화 여부 추적
+    private bool hasInitialized = false;
+    private int savedGroupIndex = -1;
+
+    void Start()
+    {
+        Debug.Log($"<color=magenta>========== Start 호출됨 ==========</color>");
+
+        if (leftHandle != null)
+        {
+            leftHandleInitialRotation = leftHandle.localRotation;
+        }
+        if (rightHandle != null)
+        {
+            rightHandleInitialRotation = rightHandle.localRotation;
+        }
+
+        // 처음 시작할 때만 초기화
+        if (!hasInitialized)
+        {
+            hasInitialized = true;
+            savedGroupIndex = currentGroupIndex;
+            LoadWaypointGroup(currentGroupIndex);
+            lastSwitchedGroupIndex = currentGroupIndex;
+            Debug.Log($"<color=cyan>첫 초기화: 그룹 {currentGroupIndex}</color>");
+        }
+        else
+        {
+            // 이미 초기화됐으면 저장된 그룹 사용
+            Debug.Log($"<color=cyan>이미 초기화됨, 저장된 그룹 {savedGroupIndex} 사용</color>");
+            currentGroupIndex = savedGroupIndex;
+            LoadWaypointGroup(savedGroupIndex);
+        }
+
+        baseYPosition = transform.position.y;
+    }
+
+    void OnEnable()
+    {
+        Debug.Log($"<color=yellow>========== OnEnable 호출됨 ==========</color>");
+        Debug.Log($"<color=yellow>현재 그룹: {currentGroupIndex}, 저장된 그룹: {savedGroupIndex}</color>");
+
+        // OnEnable에서는 그룹을 리셋하지 않음
+        if (hasInitialized && savedGroupIndex >= 0)
+        {
+            Debug.Log($"<color=cyan>OnEnable: 저장된 그룹 {savedGroupIndex}로 복원</color>");
+            currentGroupIndex = savedGroupIndex;
+        }
+    }
 
     void Update()
     {
         if (waypoints == null || waypoints.Length == 0) return;
 
         UpdatePosition();
+        UpdateYOscillation();
         UpdateRotation();
+        UpdateSteering();
+    }
+
+    // Y축 진동 시작
+    public void StartYOscillation()
+    {
+        isYOscillating = true;
+        baseYPosition = transform.position.y;
+        yOscillationTime = 0f;
+    }
+
+    // Y축 진동 정지
+    public void StopYOscillation()
+    {
+        isYOscillating = false;
+        yOscillationTime = 0f;
+    }
+
+    // 덜컹거림 1회 실행
+    public void PlayShake()
+    {
+        if (!isShaking)
+        {
+            StartCoroutine(ShakeCoroutine());
+        }
+    }
+
+    // 덜컹거림 코루틴
+    private IEnumerator ShakeCoroutine()
+    {
+        isShaking = true;
+        float elapsed = 0f;
+
+        while (elapsed < shakeDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / shakeDuration;
+
+            float intensity = shakeCurve.Evaluate(t) * shakeIntensity;
+
+            float offsetX = Random.Range(-1f, 1f) * intensity;
+            float offsetY = Random.Range(-1f, 1f) * intensity;
+            float offsetZ = Random.Range(-1f, 1f) * intensity;
+
+            Vector3 shakeOffset = new Vector3(offsetX, offsetY, offsetZ);
+            transform.position += shakeOffset;
+
+            yield return null;
+        }
+
+        isShaking = false;
+    }
+
+    void UpdateYOscillation()
+    {
+        if (!enableYOscillation && !isYOscillating) return;
+
+        if (enableYOscillation || isYOscillating)
+        {
+            yOscillationTime += Time.deltaTime * ySpeed;
+            float yOffset = Mathf.Sin(yOscillationTime) * yAmplitude;
+
+            Vector3 pos = transform.position;
+            pos.y = baseYPosition + yOffset;
+            transform.position = pos;
+        }
+    }
+
+    private void LoadWaypointGroup(int groupIndex)
+    {
+        if (waypointGroups == null || waypointGroups.Length == 0)
+        {
+            Debug.LogWarning("웨이포인트 그룹이 설정되지 않았습니다.");
+            waypoints = new Transform[0];
+            return;
+        }
+
+        if (groupIndex < 0 || groupIndex >= waypointGroups.Length)
+        {
+            Debug.LogError($"잘못된 그룹 인덱스: {groupIndex}");
+            return;
+        }
+
+        Transform group = waypointGroups[groupIndex];
+        if (group == null)
+        {
+            Debug.LogError($"그룹 {groupIndex}가 null입니다.");
+            waypoints = new Transform[0];
+            return;
+        }
+
+        int childCount = group.childCount;
+        waypoints = new Transform[childCount];
+
+        for (int i = 0; i < childCount; i++)
+        {
+            waypoints[i] = group.GetChild(i);
+        }
+
+        Debug.Log($"웨이포인트 그룹 {groupIndex} 로드 완료: {childCount}개의 웨이포인트");
+    }
+
+    public void SwitchToGroup(int groupIndex)
+    {
+        if (groupIndex < 0 || groupIndex >= waypointGroups.Length)
+        {
+            Debug.LogError($"잘못된 그룹 인덱스: {groupIndex}");
+            return;
+        }
+
+        Debug.Log($"<color=lime>그룹 전환: {currentGroupIndex} → {groupIndex}</color>");
+
+        currentGroupIndex = groupIndex;
+        savedGroupIndex = groupIndex; // 저장
+
+        LoadWaypointGroup(groupIndex);
+
+        currentWaypoint = 0f;
+        waypointProgress = 0f;
+        progress = 0f;
+    }
+
+    public void SwitchToNextGroup()
+    {
+        Debug.Log($"<color=cyan>========== SwitchToNextGroup 호출됨 ==========</color>");
+        Debug.Log($"<color=yellow>현재 시간: {Time.time}</color>");
+        Debug.Log($"<color=yellow>마지막 전환 시간: {lastSwitchTime}</color>");
+        Debug.Log($"<color=yellow>현재 그룹 인덱스: {currentGroupIndex}</color>");
+        Debug.Log($"<color=yellow>저장된 그룹: {savedGroupIndex}</color>");
+
+        // 쿨다운 체크
+        if (preventTimelineReset && Time.time - lastSwitchTime < switchCooldown)
+        {
+            Debug.Log($"<color=red>쿨다운 중! 남은 시간: {switchCooldown - (Time.time - lastSwitchTime)}초</color>");
+            return;
+        }
+
+        int nextIndex = (currentGroupIndex + 1) % waypointGroups.Length;
+        Debug.Log($"<color=green>계산된 다음 인덱스: {nextIndex}</color>");
+
+        // 같은 그룹으로 다시 전환하려고 하면 스킵
+        if (preventTimelineReset && nextIndex == lastSwitchedGroupIndex && Time.time - lastSwitchTime < 1f)
+        {
+            Debug.Log($"<color=red>이미 그룹 {nextIndex}로 전환됨, 스킵</color>");
+            return;
+        }
+
+        Debug.Log($"<color=lime> 그룹 전환 진행: {currentGroupIndex} → {nextIndex}</color>");
+
+        lastSwitchTime = Time.time;
+        lastSwitchedGroupIndex = nextIndex;
+
+        SwitchToGroup(nextIndex);
+    }
+
+    public void SwitchToPreviousGroup()
+    {
+        int prevIndex = currentGroupIndex - 1;
+        if (prevIndex < 0) prevIndex = waypointGroups.Length - 1;
+        SwitchToGroup(prevIndex);
     }
 
     void UpdatePosition()
     {
         if (waypoints.Length == 1)
         {
-            transform.position = waypoints[0].position;
+            Vector3 targetPos = waypoints[0].position;
+            baseYPosition = targetPos.y;
+            transform.position = targetPos;
             return;
         }
 
@@ -46,18 +297,21 @@ public class WaypointFollower : MonoBehaviour
         }
         else
         {
-            // 웨이포인트 번호를 progress로 변환
             t = ConvertWaypointToProgress(currentWaypoint, waypointProgress);
         }
 
+        Vector3 newPos;
         if (useSmoothCurve && waypoints.Length >= 4)
         {
-            transform.position = GetCatmullRomPosition(t);
+            newPos = GetCatmullRomPosition(t);
         }
         else
         {
-            transform.position = GetLinearPosition(t);
+            newPos = GetLinearPosition(t);
         }
+
+        baseYPosition = newPos.y;
+        transform.position = newPos;
     }
 
     void UpdateRotation()
@@ -69,23 +323,35 @@ public class WaypointFollower : MonoBehaviour
 
         if (useWaypointRotation)
         {
-            // 웨이포인트의 회전값 보간
             targetRotation = GetRotationAtProgress(t);
         }
         else
         {
-            // 이동 방향으로 회전
             Vector3 direction = GetDirectionAtProgress(t);
             if (direction == Vector3.zero) return;
-            targetRotation = Quaternion.LookRotation(direction);
+
+            if (useSlopeRotation)
+            {
+                targetRotation = Quaternion.LookRotation(direction);
+            }
+            else
+            {
+                Vector3 horizontalDirection = new Vector3(direction.x, 0f, direction.z).normalized;
+                if (horizontalDirection == Vector3.zero)
+                {
+                    horizontalDirection = transform.forward;
+                }
+                targetRotation = Quaternion.LookRotation(horizontalDirection);
+            }
         }
 
         if (smoothRotation)
         {
+            float rotSpeed = useSlopeRotation ? slopeRotationSpeed : rotationSpeed;
             transform.rotation = Quaternion.Slerp(
                 transform.rotation,
                 targetRotation,
-                Time.deltaTime * rotationSpeed
+                Time.deltaTime * rotSpeed
             );
         }
         else
@@ -94,44 +360,73 @@ public class WaypointFollower : MonoBehaviour
         }
     }
 
-    // 웨이포인트 번호를 progress(0~1)로 변환
+    void UpdateSteering()
+    {
+        if (leftHandle == null && rightHandle == null) return;
+
+        float angularVelocity = GetAngularVelocity();
+        float targetAngle = angularVelocity * maxSteeringAngle;
+
+        currentSteeringAngle = Mathf.Lerp(
+            currentSteeringAngle,
+            targetAngle,
+            Time.deltaTime * steeringSpeed
+        );
+
+        Quaternion handleRotationOffset = Quaternion.Euler(
+            steeringAxis.x * currentSteeringAngle,
+            steeringAxis.y * currentSteeringAngle,
+            steeringAxis.z * currentSteeringAngle
+        );
+
+        if (leftHandle != null)
+        {
+            leftHandle.localRotation = leftHandleInitialRotation * handleRotationOffset;
+        }
+
+        if (rightHandle != null)
+        {
+            rightHandle.localRotation = rightHandleInitialRotation * handleRotationOffset;
+        }
+    }
+
+    float GetAngularVelocity()
+    {
+        if (waypoints.Length < 2) return 0f;
+
+        float t = useProgress ? progress : ConvertWaypointToProgress(currentWaypoint, waypointProgress);
+
+        float delta = 0.01f;
+        float nextT = Mathf.Min(t + delta, 1f);
+
+        Vector3 currentDir = GetDirectionAtProgress(t);
+        Vector3 nextDir = GetDirectionAtProgress(nextT);
+
+        if (currentDir == Vector3.zero || nextDir == Vector3.zero) return 0f;
+
+        Vector3 currentDirHorizontal = new Vector3(currentDir.x, 0f, currentDir.z).normalized;
+        Vector3 nextDirHorizontal = new Vector3(nextDir.x, 0f, nextDir.z).normalized;
+
+        if (currentDirHorizontal == Vector3.zero || nextDirHorizontal == Vector3.zero) return 0f;
+
+        float angle = Vector3.SignedAngle(currentDirHorizontal, nextDirHorizontal, Vector3.up);
+
+        return Mathf.Clamp(angle / delta, -1f, 1f);
+    }
+
     float ConvertWaypointToProgress(float waypointNum, float wpProgress)
     {
         if (waypoints.Length <= 1) return 0f;
 
         int totalSegments = waypoints.Length - 1;
-
-        // 웨이포인트 번호를 0 ~ totalSegments 범위로 클램프
         float clampedWaypoint = Mathf.Clamp(waypointNum, 0f, totalSegments);
-
-        // 해당 웨이포인트의 시작 progress
         float baseProgress = clampedWaypoint / totalSegments;
-
-        // 세그먼트 내 진행도 추가
         float segmentLength = 1f / totalSegments;
         float finalProgress = baseProgress + (wpProgress * segmentLength);
 
         return Mathf.Clamp01(finalProgress);
     }
 
-    // progress를 웨이포인트 번호로 변환 (디버깅용)
-    void ConvertProgressToWaypoint(float prog, out float waypointNum, out float wpProg)
-    {
-        if (waypoints.Length <= 1)
-        {
-            waypointNum = 0f;
-            wpProg = 0f;
-            return;
-        }
-
-        int totalSegments = waypoints.Length - 1;
-        float segmentValue = prog * totalSegments;
-
-        waypointNum = Mathf.Floor(segmentValue);
-        wpProg = segmentValue - waypointNum;
-    }
-
-    // 특정 웨이포인트로 즉시 이동
     public void MoveToWaypoint(int waypointIndex, float progressInSegment = 0f)
     {
         useProgress = false;
@@ -139,7 +434,6 @@ public class WaypointFollower : MonoBehaviour
         waypointProgress = Mathf.Clamp01(progressInSegment);
     }
 
-    // 특정 웨이포인트로 이동 (float 버전)
     public void MoveToWaypoint(float waypointNumber)
     {
         useProgress = false;
@@ -147,7 +441,6 @@ public class WaypointFollower : MonoBehaviour
         waypointProgress = 0f;
     }
 
-    // 웨이포인트 회전값 보간
     Quaternion GetRotationAtProgress(float t)
     {
         float totalSegments = waypoints.Length - 1;
@@ -164,7 +457,6 @@ public class WaypointFollower : MonoBehaviour
         );
     }
 
-    // 특정 진행도에서의 이동 방향 계산
     Vector3 GetDirectionAtProgress(float t)
     {
         float delta = 0.01f;
@@ -222,21 +514,18 @@ public class WaypointFollower : MonoBehaviour
         );
     }
 
-    // Scene 뷰에서 경로 시각화
     void OnDrawGizmos()
     {
         if (waypoints == null || waypoints.Length < 2) return;
 
         Gizmos.color = Color.yellow;
 
-        // Waypoint 구체
         for (int i = 0; i < waypoints.Length; i++)
         {
             if (waypoints[i] != null)
             {
                 Gizmos.DrawWireSphere(waypoints[i].position, 0.5f);
 
-                // 번호 표시 (Scene 뷰)
 #if UNITY_EDITOR
                 UnityEditor.Handles.Label(
                     waypoints[i].position + Vector3.up * 0.8f,
@@ -252,7 +541,6 @@ public class WaypointFollower : MonoBehaviour
             }
         }
 
-        // 경로 선
         Gizmos.color = Color.cyan;
         int steps = 50;
         Vector3 prevPos = waypoints[0].position;
@@ -271,7 +559,6 @@ public class WaypointFollower : MonoBehaviour
             prevPos = currentPos;
         }
 
-        // 진행 방향 화살표 (현재 위치에서)
         if (Application.isPlaying)
         {
             Gizmos.color = Color.green;
