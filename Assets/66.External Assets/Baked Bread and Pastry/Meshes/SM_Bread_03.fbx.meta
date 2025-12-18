@@ -105,3 +105,10 @@ ModelImporter:
   userData: 
   assetBundleName: 
   assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 338188
+  packageName: Baked Bread and Pastry
+  packageVersion: 1.0
+  assetPath: Assets/66.External Assets/Baked Bread and Pastry/Meshes/SM_Bread_03.fbx
+  uploadId: 800482
