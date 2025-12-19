@@ -64,10 +64,11 @@ public class WaypointFollower : MonoBehaviour
     // 추가: 초기화 여부 추적
     private bool hasInitialized = false;
     private int savedGroupIndex = -1;
+    private float gameStartTime = -1f; // 추가: 게임 시작 시간
 
     void Start()
     {
-        Debug.Log($"<color=magenta>========== Start 호출됨 ==========</color>");
+        gameStartTime = Time.time; // 게임 시작 시간 저장
 
         if (leftHandle != null)
         {
@@ -85,12 +86,9 @@ public class WaypointFollower : MonoBehaviour
             savedGroupIndex = currentGroupIndex;
             LoadWaypointGroup(currentGroupIndex);
             lastSwitchedGroupIndex = currentGroupIndex;
-            Debug.Log($"<color=cyan>첫 초기화: 그룹 {currentGroupIndex}</color>");
         }
         else
         {
-            // 이미 초기화됐으면 저장된 그룹 사용
-            Debug.Log($"<color=cyan>이미 초기화됨, 저장된 그룹 {savedGroupIndex} 사용</color>");
             currentGroupIndex = savedGroupIndex;
             LoadWaypointGroup(savedGroupIndex);
         }
@@ -100,13 +98,9 @@ public class WaypointFollower : MonoBehaviour
 
     void OnEnable()
     {
-        Debug.Log($"<color=yellow>========== OnEnable 호출됨 ==========</color>");
-        Debug.Log($"<color=yellow>현재 그룹: {currentGroupIndex}, 저장된 그룹: {savedGroupIndex}</color>");
-
         // OnEnable에서는 그룹을 리셋하지 않음
         if (hasInitialized && savedGroupIndex >= 0)
         {
-            Debug.Log($"<color=cyan>OnEnable: 저장된 그룹 {savedGroupIndex}로 복원</color>");
             currentGroupIndex = savedGroupIndex;
         }
     }
@@ -228,10 +222,8 @@ public class WaypointFollower : MonoBehaviour
             return;
         }
 
-        Debug.Log($"<color=lime>그룹 전환: {currentGroupIndex} → {groupIndex}</color>");
-
         currentGroupIndex = groupIndex;
-        savedGroupIndex = groupIndex; // 저장
+        savedGroupIndex = groupIndex;
 
         LoadWaypointGroup(groupIndex);
 
@@ -242,21 +234,21 @@ public class WaypointFollower : MonoBehaviour
 
     public void SwitchToNextGroup()
     {
-        Debug.Log($"<color=cyan>========== SwitchToNextGroup 호출됨 ==========</color>");
-        Debug.Log($"<color=yellow>현재 시간: {Time.time}</color>");
-        Debug.Log($"<color=yellow>마지막 전환 시간: {lastSwitchTime}</color>");
-        Debug.Log($"<color=yellow>현재 그룹 인덱스: {currentGroupIndex}</color>");
-        Debug.Log($"<color=yellow>저장된 그룹: {savedGroupIndex}</color>");
+        // 게임 시작 후 1초 이내의 호출은 무시 (타임라인 초기화 방지)
+        if (Time.time - gameStartTime < 1f)
+        {
+            Debug.Log($"<color=orange>게임 시작 후 {Time.time - gameStartTime:F2}초, 초기 Signal 무시</color>");
+            return;
+        }
 
         // 쿨다운 체크
         if (preventTimelineReset && Time.time - lastSwitchTime < switchCooldown)
         {
-            Debug.Log($"<color=red>쿨다운 중! 남은 시간: {switchCooldown - (Time.time - lastSwitchTime)}초</color>");
+            Debug.Log($"<color=red>쿨다운 중!</color>");
             return;
         }
 
         int nextIndex = (currentGroupIndex + 1) % waypointGroups.Length;
-        Debug.Log($"<color=green>계산된 다음 인덱스: {nextIndex}</color>");
 
         // 같은 그룹으로 다시 전환하려고 하면 스킵
         if (preventTimelineReset && nextIndex == lastSwitchedGroupIndex && Time.time - lastSwitchTime < 1f)
